@@ -326,7 +326,7 @@ class MyRoboEnv(RoboEnv):
             done = True
             reward = -1.0
         if distance_to_ball < self.distance_to_ball:
-            reward = 0.01
+            reward = 0.0001
         else:
             reward = -0.01
         
@@ -352,12 +352,14 @@ class MyRoboEnv(RoboEnv):
         ball_random_y = random.randint(-30, 30)
         
         actions = []    
-        action1 = pb2.TrainerAction(do_move_ball=pb2.DoMoveBall(position=pb2.RpcVector2D(x=ball_random_x, y=ball_random_y),
+        action1 = pb2.TrainerAction(do_move_ball=pb2.DoMoveBall(position=pb2.RpcVector2D(x=0, y=0),
                                                                 velocity=pb2.RpcVector2D(x=0, y=0)))
         actions.append(action1)
         action2 = pb2.TrainerAction(do_move_player=pb2.DoMovePlayer(
             our_side=True, uniform_number=1, position=pb2.RpcVector2D(x=random_x, y=random_y), body_direction=0.0))
         actions.append(action2)
+        action3 = pb2.TrainerAction(do_recover=pb2.DoRecover())
+        actions.append(action3)
         env_logger.debug(f"Trainer reset action: {actions}")
         return actions
 
@@ -370,7 +372,7 @@ if __name__ == "__main__":
         env = MyRoboEnv(render_mode="human")
         model = DQN("MlpPolicy", env, verbose=1)
         
-        model.learn(total_timesteps=10_000)
+        model.learn(total_timesteps=100_000)
 
         obs = env.reset()
         
