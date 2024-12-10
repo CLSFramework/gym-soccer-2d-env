@@ -42,6 +42,9 @@ class RoboEnv(gym.Env):
         self.trainer_action_queue = Queue()
         self.player_action_queue = Queue()
         
+        self._latest_player_state = None
+        self._latest_trainer_state = None
+        
         # Run grpc server
         if run_grpc_server:
             env_logger.info("Starting gRPC server...")
@@ -73,12 +76,13 @@ class RoboEnv(gym.Env):
         
     def _fake_player(self, action=pb2.PlayerAction(body_hold_ball=pb2.Body_HoldBall())):
         try:
-            obs: pb2.State = self.player_state_queue.get(block=False)
-            if obs is None:
+            state: pb2.State = self.player_state_queue.get(block=False)
+            if state is None:
                 return (-1, -1)
-            env_logger.debug(f"Player observation cycle: {obs.world_model.cycle}")
+            env_logger.debug(f"Player state cycle: {state.world_model.cycle}")
+            self._latest_player_state = state
             self._send_action_to_player(action)
-            return (obs.world_model.cycle, obs.world_model.stoped_cycle)
+            return (state.world_model.cycle, state.world_model.stoped_cycle)
         except Empty as e:
             return (-1, -1)
         except Exception as e:
@@ -87,12 +91,13 @@ class RoboEnv(gym.Env):
     
     def _fake_trainer(self, action=pb2.TrainerAction(do_change_mode=pb2.DoChangeMode(game_mode_type=pb2.GameModeType.PlayOn, side=pb2.Side.LEFT))):
         try:
-            obs = self.trainer_state_queue.get(block=False)
-            if obs is None:
+            state = self.trainer_state_queue.get(block=False)
+            if state is None:
                 return (-1, -1)
-            env_logger.debug(f"Trainer observation cycle: {obs.world_model.cycle}")
+            env_logger.debug(f"Trainer state cycle: {state.world_model.cycle}")
+            self._latest_trainer_state = state
             self._send_action_to_trainer(action)
-            return (obs.world_model.cycle, obs.world_model.stoped_cycle)
+            return (state.world_model.cycle, state.world_model.stoped_cycle)
         except Empty as e:
             return (-1, -1)
         except Exception as e:
@@ -102,6 +107,8 @@ class RoboEnv(gym.Env):
     latest_player_cycle = (-1, -1)
     latest_trainer_cycle = (-1, -1)
     def _wait_for_agents(self):
+        RoboEnv.latest_player_cycle = (-1, -1)
+        RoboEnv.latest_trainer_cycle = (-1, -1)
         while True:
             latest_player_cycle = self._fake_player()
             latest_trainer_cycle = self._fake_trainer()
@@ -123,22 +130,32 @@ class RoboEnv(gym.Env):
             except KeyboardInterrupt:
                 break
         
-    def env_reset(self, first_reset=False):
+    def env_reset(self):
         # Send reset action to trainer
-        self._send_reset_action_to_trainer()
+        reset_actions = self.trainer_reset_actions()
+        self._send_action_to_trainer(reset_actions)
+        
         # Send fake action to player
-        self._send_fake_action_to_player()
+        self._send_action_to_player(pb2.PlayerAction(body_hold_ball=pb2.Body_HoldBall()))
         
         # Wait for player observation
         player_state = self.player_state_queue.get()
+        self._latest_player_state = player_state
         # Wait for trainer observation
-        trainer_observation = self.trainer_state_queue.get()
+        trainer_state = self.trainer_state_queue.get()
+        self._latest_trainer_state = trainer_state
+        
+        if player_state.world_model.cycle != trainer_state.world_model.cycle:
+            env_logger.error(f"SyncError: Player cycle: {player_state.world_model.cycle}, Trainer cycle: {trainer_state.world_model.cycle} are not in sync.")
+            self._wait_for_agents()
+            
+        env_logger.debug(f"Reset Environment at cycle: ##{player_state.world_model.cycle}##")
         
         # Return player observation
-        return self.state_to_observation(player_state), trainer_observation
+        return self.state_to_observation(player_state), trainer_state
     
     def abs_reset(self):
-        player_observation, trainer_observation = self.env_reset(first_reset=True)
+        player_observation, trainer_observation = self.env_reset()
         return player_observation
         
     def reset(self):
@@ -146,19 +163,29 @@ class RoboEnv(gym.Env):
     
     def step(self, action):
         # Send action to player
-        self._send_action_to_player(self.action_to_player_action(action))
+        self._send_action_to_player(self.action_to_rpc_actions(action, self._latest_player_state))
         
         # Send fake action to trainer
-        self._send_fake_action_to_trainer()
+        self._send_action_to_trainer(pb2.TrainerAction(do_change_mode=pb2.DoChangeMode(game_mode_type=pb2.GameModeType.PlayOn, side=pb2.Side.LEFT)))
         
         # Wait for player observation
-        player_observation = self.state_to_observation(self.player_state_queue.get())
+        player_state:pb2.State = self.player_state_queue.get()
+        self._latest_player_state = player_state
+        player_observation = self.state_to_observation(player_state)
+        
         # Wait for trainer observation
-        trainer_observation = self.trainer_state_queue.get()
+        trainer_state:pb2.State = self.trainer_state_queue.get()
+        self._latest_trainer_state = trainer_state
+        
+        if player_state.world_model.cycle != trainer_state.world_model.cycle:
+            env_logger.error(f"Player cycle: {player_state.world_model.cycle}, Trainer cycle: {trainer_state.world_model.cycle} are not in sync.")
+            self._wait_for_agents()
+        
+        env_logger.debug(f"Step Environment at cycle: ##{player_state.world_model.cycle}##")
         
         # Check trainer observation
         # Calculate reward
-        done, reward = self.check_trainer_observation(trainer_observation)
+        done, reward = self.check_trainer_observation(trainer_state)
         
         # Return player observation, reward, done, info
         return player_observation, reward, done, {}
@@ -185,32 +212,22 @@ class RoboEnv(gym.Env):
             env_logger.info("Terminating Trainer and Player by joining thread...")
             self.agents_thread.join()
     
-    def _send_fake_action_to_player(self):
-        self._send_action_to_player(pb2.PlayerAction(body_hold_ball=pb2.Body_HoldBall()))
-        
-    def _send_fake_action_to_trainer(self):
-        self._send_action_to_trainer(pb2.TrainerAction(do_change_mode=pb2.DoChangeMode(game_mode_type=pb2.GameModeType.PlayOn, side=pb2.Side.LEFT)))
-        
     def _send_action_to_player(self, action):
         self.player_action_queue.put(action)
         
     def _send_action_to_trainer(self, action):
         self.trainer_action_queue.put(action)
         
-    def action_to_player_action(self, action):
+    def action_to_rpc_actions(self, action, player_state: pb2.State):
         pass
     
-    def state_to_observation(self, state):
+    def state_to_observation(self, state: pb2.State):
         pass
     
     def check_trainer_observation(self, observation):
         pass
     
-    def _send_reset_action_to_trainer(self):
-        actions = self.trainer_reset_action()
-        self._send_action_to_trainer(actions)
-    
-    def trainer_reset_action(self):
+    def trainer_reset_actions(self):
         pass
     
     def _run_rcssserver(self):
@@ -274,38 +291,24 @@ class MyRoboEnv(RoboEnv):
     def __init__(self, render_mode=None):
         super(MyRoboEnv, self).__init__(render_mode)
         
-        self.action_space = spaces.Discrete(8)
-        self.observation_space = spaces.Box(low=-1, high=1, shape=(5,), dtype=np.float32)
+        self.action_space = spaces.Discrete(16)
+        self.observation_space = spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32)
         self.distance_to_ball = 0.0
         self.step_number = 0
         
-    def action_to_player_action(self, action):
-        env_logger.debug(f"action_to_player_action: {action}")
+    def action_to_rpc_actions(self, action, player_state: pb2.State):
+        env_logger.debug(f"action_to_rpc_actions: {action}")
         self.step_number += 1
-        if action == 0:
-            return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=0))
-        elif action == 1:
-            return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=45))
-        elif action == 2:
-            return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=90))
-        elif action == 3:
-            return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=135))
-        elif action == 4:
-            return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=180))
-        elif action == 5:
-            return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=225))
-        elif action == 6:
-            return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=270))
-        elif action == 7:
-            return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=315))
+        relative_direction = action * 22.5
+        return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))
     
     def state_to_observation(self, state: pb2.State):
-        ball_x = state.world_model.ball.position.x / 52.5
-        ball_y = state.world_model.ball.position.y / 34.0
-        player_x = state.world_model.self.position.x / 52.5
-        player_y = state.world_model.self.position.y / 34.0
-        player_body_angle = state.world_model.self.body_direction / 360.0
-        obs = np.array([ball_x, ball_y, player_x, player_y, player_body_angle])
+        ball_pos = Vector2D(state.world_model.ball.position.x, state.world_model.ball.position.y)
+        player_pos = Vector2D(state.world_model.self.position.x, state.world_model.self.position.y)
+        player_body = AngleDeg(state.world_model.self.body_direction)
+        player_to_ball = (ball_pos - player_pos).th()
+        player_body_to_ball = (player_to_ball - player_body).degree() / 180.0
+        obs = np.array([player_body_to_ball, player_body.degree() / 180.0, player_pos.x() / 52.5, player_pos.y() / 34.0])
         env_logger.debug(f"Observation: {obs}")
         return obs
     
@@ -330,6 +333,8 @@ class MyRoboEnv(RoboEnv):
         else:
             reward = -0.01
         
+        reward = -0.001
+        
         if self.step_number > 100:
             done = True
         
@@ -339,20 +344,20 @@ class MyRoboEnv(RoboEnv):
         return done, reward
     
     def abs_reset(self):
-        player_observation, trainer_observation = self.env_reset(first_reset=True)
+        player_observation, trainer_observation = self.env_reset()
         self.check_trainer_observation(trainer_observation)
         
         return player_observation
     
-    def trainer_reset_action(self):
+    def trainer_reset_actions(self):
         self.step_number = 0
         random_x = random.randint(-50, 50)
         random_y = random.randint(-30, 30)
-        ball_random_x = random.randint(-50, 50)
-        ball_random_y = random.randint(-30, 30)
+        ball_random_x = random.randint(0, 0)
+        ball_random_y = random.randint(0, 0)
         
         actions = []    
-        action1 = pb2.TrainerAction(do_move_ball=pb2.DoMoveBall(position=pb2.RpcVector2D(x=0, y=0),
+        action1 = pb2.TrainerAction(do_move_ball=pb2.DoMoveBall(position=pb2.RpcVector2D(x=ball_random_x, y=ball_random_y),
                                                                 velocity=pb2.RpcVector2D(x=0, y=0)))
         actions.append(action1)
         action2 = pb2.TrainerAction(do_move_player=pb2.DoMovePlayer(
@@ -360,7 +365,6 @@ class MyRoboEnv(RoboEnv):
         actions.append(action2)
         action3 = pb2.TrainerAction(do_recover=pb2.DoRecover())
         actions.append(action3)
-        env_logger.debug(f"Trainer reset action: {actions}")
         return actions
 
 from stable_baselines3 import DQN
