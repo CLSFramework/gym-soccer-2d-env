@@ -53,11 +53,15 @@ class GrpcAgent:
             action = self.player_action_queue.get()
             
             if action is not None:
-                actions.append(action)
+                if isinstance(action, list):
+                    for a in action:
+                        actions.append(a)
+                else:
+                    actions.append(action)
             
             self.logger.debug(f"Actions: {actions}")
             
-            return pb2.PlayerActions(actions=actions)
+            return pb2.PlayerActions(actions=actions, ignore_preprocess=True)
         except Exception as e:
             self.logger.error(f"Error in GetPlayerActions: {e}")
             return pb2.PlayerActions(actions=[])
@@ -81,20 +85,6 @@ class GrpcAgent:
     def GetTrainerActions(self, state: pb2.State):
         try:
             actions = []
-            # actions.append(
-            #         pb2.TrainerAction(
-            #             do_move_ball=pb2.DoMoveBall(
-            #                 position=pb2.RpcVector2D(
-            #                     x=40,
-            #                     y=20
-            #                 ),
-            #                 velocity=pb2.RpcVector2D(
-            #                     x=0,
-            #                     y=0
-            #                 ),
-            #             )
-            #         )
-            #     )
             self.trainer_state_queue.put(state)
             action = self.trainer_action_queue.get()
             
