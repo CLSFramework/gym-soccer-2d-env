@@ -185,10 +185,10 @@ class RoboEnv(gym.Env):
         
         # Check trainer observation
         # Calculate reward
-        done, reward = self.check_trainer_observation(trainer_state)
+        done, reward, info = self.check_trainer_observation(trainer_state)
         
         # Return player observation, reward, done, info
-        return player_observation, reward, done, {}
+        return player_observation, reward, done, info
     
     def render(self, mode="human"):
         pass
@@ -292,13 +292,15 @@ class MyRoboEnv(RoboEnv):
         super(MyRoboEnv, self).__init__(render_mode)
         
         self.action_space = spaces.Discrete(16)
-        self.observation_space = spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32)
         self.distance_to_ball = 0.0
         self.step_number = 0
         
     def action_to_rpc_actions(self, action, player_state: pb2.State):
         env_logger.debug(f"action_to_rpc_actions: {action}")
         self.step_number += 1
+        if isinstance(action, (list, tuple, np.ndarray)):
+            action = action[0]
         relative_direction = action * 22.5
         return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))
     
@@ -308,7 +310,13 @@ class MyRoboEnv(RoboEnv):
         player_body = AngleDeg(state.world_model.self.body_direction)
         player_to_ball = (ball_pos - player_pos).th()
         player_body_to_ball = (player_to_ball - player_body).degree() / 180.0
-        obs = np.array([player_body_to_ball, player_body.degree() / 180.0, player_pos.x() / 52.5, player_pos.y() / 34.0])
+        obs = np.array([player_body_to_ball, 
+                        player_body.degree() / 180.0, 
+                        player_pos.x() / 52.5, 
+                        player_pos.y() / 34.0, 
+                        ball_pos.x() / 52.5, 
+                        ball_pos.y() / 34.0])
+        # obs = np.array([player_body_to_ball])
         env_logger.debug(f"Observation: {obs}")
         return obs
     
@@ -321,27 +329,30 @@ class MyRoboEnv(RoboEnv):
         player_pos = Vector2D(player_x, player_y)
         distance_to_ball = ball_pos.dist(player_pos)
         
+        info = {'result': None}
         done, reward = False, 0.0
+        if distance_to_ball > self.distance_to_ball:
+            reward = -0.01
+        else:
+            reward = 0.001
+            
         if distance_to_ball < 5.0:
             done = True
             reward = 1.0
+            info['result'] = 'Goal'
         if player_pos.abs_x() > 52.5 or player_pos.abs_y() > 34.0:
             done = True
             reward = -1.0
-        if distance_to_ball < self.distance_to_ball:
-            reward = 0.0001
-        else:
-            reward = -0.01
-        
-        reward = -0.001
+            info['result'] = 'Out'
         
         if self.step_number > 100:
             done = True
+            info['result'] = 'Timeout'
         
         env_logger.debug(f"Ball position: {ball_pos}, Player position: {player_pos} Distance to ball: {distance_to_ball} Previous distance: {self.distance_to_ball} Reward: {reward} Done: {done} Step number: {self.step_number} ")
         self.distance_to_ball = distance_to_ball
         
-        return done, reward
+        return done, reward, info
     
     def abs_reset(self):
         player_observation, trainer_observation = self.env_reset()
@@ -353,15 +364,16 @@ class MyRoboEnv(RoboEnv):
         self.step_number = 0
         random_x = random.randint(-50, 50)
         random_y = random.randint(-30, 30)
-        ball_random_x = random.randint(0, 0)
-        ball_random_y = random.randint(0, 0)
+        ball_random_x = random.randint(-50, 50)
+        ball_random_y = random.randint(-30, 30)
+        random_body_direction = random.randint(0, 360)
         
         actions = []    
         action1 = pb2.TrainerAction(do_move_ball=pb2.DoMoveBall(position=pb2.RpcVector2D(x=ball_random_x, y=ball_random_y),
                                                                 velocity=pb2.RpcVector2D(x=0, y=0)))
         actions.append(action1)
         action2 = pb2.TrainerAction(do_move_player=pb2.DoMovePlayer(
-            our_side=True, uniform_number=1, position=pb2.RpcVector2D(x=random_x, y=random_y), body_direction=0.0))
+            our_side=True, uniform_number=1, position=pb2.RpcVector2D(x=random_x, y=random_y), body_direction=random_body_direction))
         actions.append(action2)
         action3 = pb2.TrainerAction(do_recover=pb2.DoRecover())
         actions.append(action3)
@@ -370,18 +382,55 @@ class MyRoboEnv(RoboEnv):
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import BaseCallback
 
+class InfoCollectorCallback(BaseCallback):
+    def __init__(self):
+        super().__init__()
+        self.infos = []  # To store the info dictionaries
+
+    def _on_step(self) -> bool:
+        # Collect the info dictionary from the environment
+        if self.locals.get('infos') is not None:
+            infos = self.locals.get('infos')
+            for info in infos:
+                if info['result'] and len(info['result']) > 0:
+                    self.infos.append(info)
+        return True  # Continue training
+    
 if __name__ == "__main__":
     print("Press Ctrl+C to exit...")
     try:
         env = MyRoboEnv(render_mode="human")
-        model = DQN("MlpPolicy", env, verbose=1)
+        model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+        info_collector = InfoCollectorCallback()
+        model.learn(total_timesteps=100_000, callback=info_collector)
+        model.ep_info_buffer
+        env.close()
         
-        model.learn(total_timesteps=100_000)
+        import matplotlib.pyplot as plt
 
+        results_types = ['Goal', 'Out', 'Timeout']
+        results = [info['result'] for info in info_collector.infos]
+        env_logger.debug(f"Results: {results}")
+        # count results in each 100 episodes
+        results_dict = {type: [] for type in results_types}
+        for i in range(0, len(results), 100):
+            for type in results_types:
+                length = len(results[i:i+100])
+                results_dict[type].append(results[i:i+100].count(type) / length)
+                
+        # plot results
+        fig, ax = plt.subplots()
+        ax.plot(results_dict['Goal'], label='Goal')
+        ax.plot(results_dict['Out'], label='Out')
+        ax.plot(results_dict['Timeout'], label='Timeout')
+        ax.legend()
+        plt.show()
+
+        env = MyRoboEnv(render_mode="human")
         obs = env.reset()
         
-        while True:
-            action = random.randint(0, 7)
+        for _ in range(1000):
+            action = model.predict(obs)
             obs, reward, done, info = env.step(action)
             env_logger.debug(f"Observation: {obs}, Reward: {reward}, Done: {done}, Info: {info}")
             if done:
@@ -390,8 +439,7 @@ if __name__ == "__main__":
             # Keep the main process alive
             # env._fake_player(pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=0)))
             # env._fake_trainer(action)
-            time.sleep(0.001)  # Adjust sleep time as needed
-        self.agents_thread.join()
+            time.sleep(0.0001)  # Adjust sleep time as needed
     except KeyboardInterrupt:
         print("\nCtrl+C detected. Shutting down...")
     finally:
