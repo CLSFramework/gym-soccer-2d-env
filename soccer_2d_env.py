@@ -31,7 +31,8 @@ class Soccer2DEnv(gym.Env):
                  run_grpc_server: bool = True, 
                  run_rcssserver: bool = True, 
                  run_trainer_player: bool = True,
-                 logger: logging.Logger = None):
+                 logger: logging.Logger = None,
+                 log_dir: str = log_dir):
         """
         Initialize the Soccer2DEnv environment.
         
@@ -40,8 +41,10 @@ class Soccer2DEnv(gym.Env):
         :param run_rcssserver: Flag to run RCSSServer.
         :param run_trainer_player: Flag to run trainer and player processes.
         :param logger: Logger instance for logging.
+        :param log_dir: Directory for rcssserver logs.
         """
         super(Soccer2DEnv, self).__init__()
+        self.log_dir = log_dir
         self.logger = logger
         if self.logger is None:
             self.logger = setup_logger('Soccer2DEnv', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
@@ -336,13 +339,20 @@ class Soccer2DEnv(gym.Env):
         :return: Subprocess running the RCSSServer.
         """
         rcssserver_path = 'scripts/rcssserver/rcssserver'
+        rcssserver_params = ['--server::synch_mode=true', 
+                             '--server::auto_mode=true', 
+                             '--server::coach=true',
+                             f'--server::game_log_dir={self.log_dir}',
+                             f'--server::text_log_dir={self.log_dir}'
+                             ]
+                             
         if not os.path.exists(rcssserver_path):
             raise FileNotFoundError(f"{rcssserver_path} does not exist.")
         if not os.access(rcssserver_path, os.X_OK):
             raise PermissionError(f"{rcssserver_path} is not executable. Check permissions.")
 
         process = subprocess.Popen(
-            ['./rcssserver', '--server::synch_mode=true', '--server::auto_mode=true'],
+            ['./rcssserver'] + rcssserver_params,
             cwd='scripts/rcssserver',  # Corrected directory to where start.sh is located
             preexec_fn=os.setsid,  # Create a new session and set the process group ID
             stdout=subprocess.PIPE,

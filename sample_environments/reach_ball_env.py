@@ -14,11 +14,11 @@ from soccer_2d_env import Soccer2DEnv
 log_dir = os.path.join(os.getcwd(), 'logs', datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
 
 class ReachBallEnv(Soccer2DEnv):
-    def __init__(self, render_mode=None, logger=None):
+    def __init__(self, render_mode=None, logger=None, log_dir=log_dir):
         self.logger = logger
         if self.logger is None:
             self.logger = setup_logger('ReachBallEnv', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
-        super(ReachBallEnv, self).__init__(render_mode, logger=self.logger)
+        super(ReachBallEnv, self).__init__(render_mode, logger=self.logger, log_dir=log_dir)
         
         self.action_space = spaces.Discrete(16)
         self.observation_space = spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32)
