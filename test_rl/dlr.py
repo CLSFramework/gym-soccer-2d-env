@@ -1,5 +1,5 @@
 import gymnasium as gym
-from simple_env import CustomFieldEnv
+from test_rl.simple_env import CustomFieldEnv
 from stable_baselines3 import DQN
 
 from stable_baselines3.common.callbacks import BaseCallback

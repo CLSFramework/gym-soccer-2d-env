@@ -5,7 +5,7 @@ import datetime
 from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import BaseCallback
 from utils.logger_utils import setup_logger
-from sample_env import SampleEnv
+from sample_environments.reach_center_env import ReachCenterEnv
 import matplotlib.pyplot as plt
 
 
@@ -29,7 +29,7 @@ class InfoCollectorCallback(BaseCallback):
 if __name__ == "__main__":
     print("Press Ctrl+C to exit...")
     try:
-        env = SampleEnv(render_mode="human", logger=logger)
+        env = ReachCenterEnv(render_mode="human", logger=logger)
         model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
         info_collector = InfoCollectorCallback()
         model.learn(total_timesteps=1_000_000, callback=info_collector)
@@ -54,7 +54,7 @@ if __name__ == "__main__":
         ax.legend()
         plt.show()
 
-        env = SampleEnv(render_mode="human")
+        env = ReachCenterEnv(render_mode="human")
         obs = env.reset()
         
         for _ in range(1000):
