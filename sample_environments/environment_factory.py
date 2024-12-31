@@ -1,5 +1,4 @@
 from sample_environments.reach_ball_env import ReachBallEnv
-from sample_environments.reach_center_env import ReachCenterEnv
 from soccer_2d_env import Soccer2DEnv
 
 class EnvironmentFactory:
@@ -23,9 +22,7 @@ class EnvironmentFactory:
         :return: Instance of Soccer2DEnv.
         :raises ValueError: If the environment name is not found.
         """
-        if env_name.lower() == "reachcenter":
-            return ReachCenterEnv(render_mode=render_mode, logger=logger, log_dir=log_dir, **kwargs)
-        elif env_name.lower() == "reachball":
+        if env_name.lower() == "reachball":
             return ReachBallEnv(render_mode=render_mode, logger=logger, log_dir=log_dir, **kwargs)
         else:
             raise ValueError(f"Environment {env_name} not found.")
