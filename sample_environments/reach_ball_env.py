@@ -31,27 +31,59 @@ class ReachBallEnv(Soccer2DEnv):
         self.ball_direction = kwargs.get('ball_direction', 0)
         self.min_distance_to_ball = kwargs.get('min_distance_to_ball', 5.0)
         self.max_steps = kwargs.get('max_steps', 100)
+        self.use_continuous_action = kwargs.get('use_continuous_action', True)
         self.action_space_size = kwargs.get('action_space_size', 16)
+        self.use_turning = kwargs.get('use_turning', False)
         
         # Define action and observation spaces
-        self.action_space = spaces.Discrete(self.action_space_size)
+        if self.use_continuous_action:
+            if self.use_turning:
+                self.action_space = spaces.Box(low=[0, 0, 0, 0],
+                                               high=[1, 1, 1, 1],
+                                               shape=(4,), dtype=np.float32)
+            else:
+                self.action_space = spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float32)
+        else:
+            self.action_space = spaces.Discrete(self.action_space_size)
         self.observation_space = spaces.Box(low=-1, high=1, shape=(10,), dtype=np.float32)
         self.distance_to_ball = 0.0
         self.step_number = 0
         
     def action_to_rpc_actions(self, action, player_state: pb2.State):
-        self.logger.debug(f"action_to_rpc_actions: {action}")
+        self.logger.debug(f"action_to_rpc_actions: {action} {type(action)}")
         self.step_number += 1
         # Convert action to a single integer if necessary
         if isinstance(action, (list, tuple, np.ndarray)):
+            self.logger.debug(f"here1")
+            if isinstance(action, tuple):
+                self.logger.debug(f"here2 {action[0]} {type(action[0])}")
+                action = action[0]
             if isinstance(action, np.ndarray):
+                self.logger.debug(f"here3 {action.size}")
                 if action.size == 1:
                     action = action.item()
             else:
                 action = action[0]
         # Calculate relative direction
-        relative_direction = (action * 360.0 / self.action_space.n) % 360.0 - 180.0
-        return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))
+        if self.use_continuous_action:
+            if self.use_turning:
+                turn_prob = action[0]
+                turn_angle = action[1]
+                dash_prob = action[2]
+                dash_angle = action[3]
+                
+                if random.random() < turn_prob / (turn_prob + dash_prob):
+                    relative_direction = (turn_angle * 360.0) % 360.0 - 180.0
+                    return pb2.PlayerAction(turn=pb2.Turn(relative_direction=relative_direction))
+                else:
+                    relative_direction = (dash_angle * 360.0) % 360.0 - 180.0
+                    return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))
+            else:
+                relative_direction = action * 180.0
+                return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))
+        else:
+            relative_direction = (action * 360.0 / self.action_space.n) % 360.0 - 180.0
+            return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))
     
     def state_to_observation(self, state: pb2.State):
         # Extract positions and directions
@@ -152,8 +184,8 @@ class ReachBallEnv(Soccer2DEnv):
     def get_ball_velocity(self, ball_position_x, ball_position_y):
         # Ball should not go out of bounds after steps
         
-        while True:
-            if self.change_ball_velocity:
+        if self.change_ball_velocity:
+            while True:
                 ball_random_speed = random.random() * 3.0
                 ball_random_direction = random.randint(0, 360)
                 ball_velocity = Vector2D.from_polar(ball_random_speed, ball_random_direction)
@@ -163,8 +195,9 @@ class ReachBallEnv(Soccer2DEnv):
                 
                 if abs(ball_target.x()) <= 52.5 and abs(ball_target.y()) <= 34.0:
                     break
-            else:
-                ball_random_speed = self.ball_speed
-                ball_random_direction = self.ball_direction
+        else:
+            ball_random_speed = self.ball_speed
+            ball_random_direction = self.ball_direction
+            ball_velocity = Vector2D.from_polar(ball_random_speed, ball_random_direction)
         
         return ball_velocity

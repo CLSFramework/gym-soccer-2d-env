@@ -2,7 +2,7 @@ import os
 import time
 import logging
 import datetime
-from stable_baselines3 import DQN
+from stable_baselines3 import DDPG
 from utils.logger_utils import setup_logger
 import matplotlib.pyplot as plt
 from utils.info_collector_callback import InfoCollectorCallback
@@ -16,8 +16,8 @@ test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_le
 
 env_name = "reachball"
 kewargs = {
-    'change_ball_position': True,
-    'change_ball_velocity': True,
+    'change_ball_position': False,
+    'change_ball_velocity': False,
     'ball_position_x': 0,
     'ball_position_y': 0,
     'ball_speed': 0,
@@ -25,7 +25,7 @@ kewargs = {
     'min_distance_to_ball': 5.0,
     'max_steps': 200,
     'action_space_size': 16,
-    'use_continuous_action': False,
+    'use_continuous_action': True,
     'action_space_size': 16,
     'use_turning': False
 }
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     print("Press Ctrl+C to exit...")
     try:
         env = EnvironmentFactory().create(env_name, render_mode=False, logger=logger, log_dir=log_dir, **kewargs)
-        model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+        model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
         info_collector = InfoCollectorCallback()
         
         def train(total_timesteps):

@@ -105,12 +105,16 @@ class GoToCenterEnv(gym.Env):
     
     metadata = {'render.modes': ['human']}
     
-    def __init__(self):
+    def __init__(self, continuous=False):
         super(GoToCenterEnv, self).__init__()
-        
+        self.continuous = continuous
         # --- Action Space ---
-        # 16 discrete actions: 0..15
-        self.action_space = spaces.Discrete(16)
+        if self.continuous:
+            # Continuous action space: [dash_angle]
+            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
+        else:
+            # 16 discrete actions: 0..15
+            self.action_space = spaces.Discrete(16)
         
         # --- Observation Space ---
         # 4 features, each in range [-1, 1]
@@ -163,6 +167,14 @@ class GoToCenterEnv(gym.Env):
         """
         Execute one step in the environment.
         """
+        if self.continuous:
+            action = np.clip(action, -1.0, 1.0)
+            action = action.item()
+        else:
+            action = int(action)
+        
+        logger.debug(f"Step {self.step_count} | Action: {action}")
+        
         direction_angle = wrap_angle_deg(self.body_angle_deg + action * (360.0 / 16.0))
 
         # Convert movement direction to Cartesian deltas
@@ -210,7 +222,9 @@ class GoToCenterEnv(gym.Env):
         self.episode_history.append((self.x, self.y, self.body_angle_deg, reward))
         
         info = {'result': status}
-        return self._get_obs(), reward, terminated, truncated, info
+        obs = self._get_obs()
+        logger.debug(f"obs = {obs}, reward = {reward}, done = {terminated}, truncated = {truncated}, info = {info}")
+        return obs, reward, terminated, truncated, info
 
     def _get_obs(self):
         """
@@ -232,7 +246,7 @@ class GoToCenterEnv(gym.Env):
         x_norm = self.x / 52.5
         y_norm = self.y / 34.0
         
-        return np.array([angle_diff_norm, body_angle_norm, x_norm, y_norm], dtype=np.float32)
+        return np.array([angle_diff_norm, body_angle_norm, x_norm, y_norm], dtype=np.float32)    
     
     def render(self, mode='human'):
         """
@@ -316,7 +330,7 @@ import os
 import time
 import logging
 import datetime
-from stable_baselines3 import DQN
+from stable_baselines3 import DQN, DDPG
 from utils.logger_utils import setup_logger
 import matplotlib.pyplot as plt
 from utils.info_collector_callback import InfoCollectorCallback
@@ -331,8 +345,9 @@ test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_le
 if __name__ == "__main__":
     print("Press Ctrl+C to exit...")
     try:
-        env = GoToCenterEnv()
-        model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+        env = GoToCenterEnv(continuous=True)
+        # model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+        model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
         info_collector = InfoCollectorCallback()
         
         def train(total_timesteps):
@@ -345,7 +360,7 @@ if __name__ == "__main__":
             for _ in range(total_timesteps):
                 action, _ = model.predict(obs)
                 obs, reward, done, _, info = env.step(action)
-                logger.debug(f"Observation: {obs}, Reward: {reward}, Done: {done}, Info: {info}")
+                logger.debug(f"Observation: {obs}, Action: {action}, Reward: {reward}, Done: {done}, Info: {info}")
                 if done:
                     logger.info(f"Episode done. Info: {info}")
                     if info['result']:
@@ -362,8 +377,8 @@ if __name__ == "__main__":
         
         test_results = []
         test_results.append(test(2000))
-        for i in range(5):
-            train(5000)
+        for i in range(50):
+            train(10000)
             
             info_collector.plot_print_results(train_logger, file_name=os.path.join(log_dir, 'results'))
             
