@@ -29,8 +29,12 @@ class ReachBallEnv(Soccer2DEnv):
         self.logger.debug(f"action_to_rpc_actions: {action}")
         self.step_number += 1
         if isinstance(action, (list, tuple, np.ndarray)):
-            action = action[0]
-        relative_direction = action * 22.5
+            if isinstance(action, np.ndarray):
+                if action.size == 1:
+                    action = action.item()
+            else:
+                action = action[0]
+        relative_direction = (action * 360.0 / self.action_space.n) % 360.0 - 180.0
         return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))
     
     def state_to_observation(self, state: pb2.State):
@@ -59,26 +63,25 @@ class ReachBallEnv(Soccer2DEnv):
         distance_to_ball = ball_pos.dist(player_pos)
         
         info = {'result': None}
-        done, reward = False, 0.0
-        if distance_to_ball > self.distance_to_ball:
-            reward = -0.01
-        else:
-            reward = 0.001
+        done, reward = False, self.distance_to_ball - distance_to_ball
             
         if distance_to_ball < 5.0:
             done = True
-            reward = 1.0
+            reward += 10.0
             info['result'] = 'Goal'
         if player_pos.abs_x() > 52.5 or player_pos.abs_y() > 34.0:
             done = True
-            reward = -1.0
+            reward -= -10.0
             info['result'] = 'Out'
         
         if self.step_number > 100:
             done = True
+            reward -= 5.0
             info['result'] = 'Timeout'
         
-        self.logger.debug(f"Ball position: {ball_pos}, Player position: {player_pos} Distance to ball: {distance_to_ball} Previous distance: {self.distance_to_ball} Reward: {reward} Done: {done} Step number: {self.step_number} ")
+        self.logger.debug(f"Ball position: {ball_pos}, Player position: {player_pos}, "
+                          "Distance to ball: {distance_to_ball} Previous distance: {self.distance_to_ball}, "
+                          "Reward: {reward} Done: {done} Step number: {self.step_number} ")
         self.distance_to_ball = distance_to_ball
         
         return done, reward, info
