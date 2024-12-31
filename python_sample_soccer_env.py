@@ -4,66 +4,6 @@ from gym import spaces
 import matplotlib.pyplot as plt
 
 
-def draw_field(ax):
-    """
-    Draws the field boundaries and center.
-    """
-    # Draw the field
-    ax.set_xlim(-5.5, 52.5)
-    ax.set_ylim(-34, 34)
-    ax.axhline(0, color='black', linestyle='--', linewidth=0.5)
-    ax.axvline(0, color='black', linestyle='--', linewidth=0.5)
-
-    # Draw the center
-    ax.scatter(0, 0, color='red', label='Center', zorder=5)
-
-    # Add field boundaries
-    ax.plot([-5.5, -5.5, 52.5, 52.5, -5.5], [-34, 34, 34, -34, -34],
-            color='black', linewidth=1.5)
-
-    # Label the axes
-    ax.set_xlabel("X Position")
-    ax.set_ylabel("Y Position")
-    ax.set_title("Field and Agent Position")
-    ax.legend()
-
-def draw_agent(ax, x, y, body_angle_deg):
-    """
-    Draws the agent's position and body direction.
-
-    Parameters:
-        ax: matplotlib axis to draw on
-        x: agent's x position
-        y: agent's y position
-        body_angle_deg: agent's body angle in degrees
-    """
-    # Draw the agent's position
-    ax.scatter(x, y, color='blue', label='Agent', zorder=5)
-
-    # Draw the direction vector
-    length = 3.0  # Length of the direction vector
-    angle_rad = np.radians(body_angle_deg)
-    dx = length * np.cos(angle_rad)
-    dy = length * np.sin(angle_rad)
-    
-    ax.arrow(x, y, dx, dy, head_width=1.0, head_length=1.5, fc='blue', ec='blue', zorder=10)
-    ax.legend()
-
-def render_env(x, y, body_angle_deg):
-    """
-    Renders the environment with the agent's position and direction.
-
-    Parameters:
-        x: agent's x position
-        y: agent's y position
-        body_angle_deg: agent's body angle in degrees
-    """
-    fig, ax = plt.subplots(figsize=(10, 6))
-    draw_field(ax)
-    draw_agent(ax, x, y, body_angle_deg)
-    plt.show()
-    
-
 def wrap_angle_deg(angle):
     """
     Wrap an angle in degrees to the range [-180, 180].
@@ -127,7 +67,7 @@ class GoToCenterEnv(gym.Env):
         self.y_min, self.y_max = -34.0, 34.0
         
         # Episode constraints
-        self.max_steps = 100
+        self.max_steps = 200
         self.min_distance_to_center = 5.0
         
         # Internal state
@@ -170,12 +110,14 @@ class GoToCenterEnv(gym.Env):
         if self.continuous:
             action = np.clip(action, -1.0, 1.0)
             action = action.item()
+            action *= 180.0
         else:
             action = int(action)
+            action = action * (360.0 / 16.0) - 180.0
         
         logger.debug(f"Step {self.step_count} | Action: {action}")
         
-        direction_angle = wrap_angle_deg(self.body_angle_deg + action * (360.0 / 16.0))
+        direction_angle = wrap_angle_deg(self.body_angle_deg + action)
 
         # Convert movement direction to Cartesian deltas
         rad = np.radians(direction_angle)
@@ -224,7 +166,7 @@ class GoToCenterEnv(gym.Env):
         info = {'result': status}
         obs = self._get_obs()
         logger.debug(f"obs = {obs}, reward = {reward}, done = {terminated}, truncated = {truncated}, info = {info}")
-        return obs, reward, terminated, truncated, info
+        return obs, reward, terminated or truncated, terminated or truncated, info
 
     def _get_obs(self):
         """
@@ -252,24 +194,35 @@ class GoToCenterEnv(gym.Env):
         """
         Render the environment with a simple visualization.
         """
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.set_xlim(self.x_min, self.x_max)
-        ax.set_ylim(self.y_min, self.y_max)
+        if not hasattr(self, 'fig'):
+            # Initialize the plot only once
+            plt.ion()  # Turn on interactive mode
+            self.fig, self.ax = plt.subplots(figsize=(10, 6))
+            self.ax.set_xlim(self.x_min, self.x_max)
+            self.ax.set_ylim(self.y_min, self.y_max)
 
-        # Draw field
-        ax.plot([-5.5, -5.5, 52.5, 52.5, -5.5], [-34, 34, 34, -34, -34], color='black')
-        ax.axhline(0, color='red', linestyle='--')
-        ax.axvline(0, color='red', linestyle='--')
+            # Draw field
+            self.ax.plot([-5.5, -5.5, 52.5, 52.5, -5.5], [-34, 34, 34, -34, -34], color='black')
+            self.ax.axhline(0, color='red', linestyle='--')
+            self.ax.axvline(0, color='red', linestyle='--')
 
-        # Draw agent
-        ax.scatter(self.x, self.y, c='blue', label='Agent')
+            self.agent_point, = self.ax.plot([], [], 'bo', label='Agent')
+            self.agent_arrow = self.ax.arrow(0, 0, 0, 0, head_width=1, head_length=1.5, fc='blue', ec='blue')
+            self.ax.legend()
+            self.ax.set_title("Agent's Position and Field")
+            self.ax.set_xlabel("X")
+            self.ax.set_ylabel("Y")
+
+        # Update agent position and orientation
+        self.agent_point.set_data([self.x], [self.y])
+        self.agent_arrow.remove()  # Remove the old arrow
         rad = np.radians(self.body_angle_deg)
-        ax.arrow(self.x, self.y, np.cos(rad), np.sin(rad), head_width=1, head_length=1.5, fc='blue', ec='blue')
-        ax.legend()
-        ax.set_title("Agent's Position and Field")
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        plt.show()
+        self.agent_arrow = self.ax.arrow(self.x, self.y, np.cos(rad), np.sin(rad), head_width=1, head_length=1.5, fc='blue', ec='blue')
+
+        # Refresh the plot
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+
         
     def render_all(self):
         """
@@ -303,8 +256,10 @@ class GoToCenterEnv(gym.Env):
         
     def close(self):
         if self.viewer is not None:
+            plt.close(self.fig)
             self.viewer.close()
             self.viewer = None
+            
 
 # env = GoToCenterEnv()
 
@@ -342,6 +297,23 @@ logger = setup_logger('SampleRL', log_dir, console_level=logging.DEBUG, file_lev
 train_logger = setup_logger('Train', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
 test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
 
+# env = GoToCenterEnv(continuous=True)
+# obs = env.reset()
+# while True:
+#     # action = env.action_space.sample()
+#     logger.debug(f"x: {env.x}, y: {env.y}, body_angle_deg: {env.body_angle_deg}")
+#     logger.debug(f"Observation: {obs}")
+#     action = float(input("Enter action [-1 to 1]: "))
+#     obs, reward, done, _, info = env.step(action)
+#     logger.debug(f"Next x: {env.x}, y: {env.y}, body_angle_deg: {env.body_angle_deg}")
+#     logger.debug(f"Next Observation: {obs}, Action: {action}, Reward: {reward}, Done: {done}, Info: {info}")
+#     env.render()
+    
+#     if done:
+#         logger.info(f"Episode done. Info: {info}")
+#         env.reset()
+#     time.sleep(0.0001)  # Adjust sleep time as needed
+
 if __name__ == "__main__":
     print("Press Ctrl+C to exit...")
     try:
@@ -366,6 +338,7 @@ if __name__ == "__main__":
                     if info['result']:
                         results[info['result']] += 1
                     env.reset()
+                # env.render()
                 
                 time.sleep(0.0001)  # Adjust sleep time as needed
             
