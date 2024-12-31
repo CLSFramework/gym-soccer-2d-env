@@ -34,9 +34,13 @@ class ReachCenterEnv(Soccer2DEnv):
         self.step_number += 1
         # Ensure action is an integer
         if isinstance(action, (list, tuple, np.ndarray)):
-            action = action[0]
+            if isinstance(action, np.ndarray):
+                if action.size == 1:
+                    action = action.item()
+            else:
+                action = action[0]
         # Map discrete action to relative direction
-        relative_direction = action * 22.5  # 16 actions covering 360 degrees
+        relative_direction = (action * 360.0 / self.action_space.n) % 360.0 - 180.0
         return [pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))]
     
     def state_to_observation(self, state: pb2.State) -> np.ndarray:
@@ -46,10 +50,10 @@ class ReachCenterEnv(Soccer2DEnv):
         player_body = AngleDeg(state.world_model.self.body_direction)
         # Calculate angle to center and relative angle to player's body
         player_to_center = (Vector2D(0, 0) - player_pos).th()
-        player_body_to_center = (player_to_center - player_body).degree() / 180.0
+        player_body_to_center = (player_to_center - player_body).degree()
         # Normalize observations
         obs = np.array([
-            player_body_to_center,            # Relative angle to center
+            player_body_to_center / 180.0,            # Relative angle to center
             player_body.degree() / 180.0,     # Player's body direction
             player_pos.x() / 52.5,            # Normalized x position
             player_pos.y() / 34.0             # Normalized y position
@@ -68,26 +72,22 @@ class ReachCenterEnv(Soccer2DEnv):
         distance_to_center = center_pos.dist(player_pos)
         
         info = {'result': None}
-        done, reward = False, 0.0
-        # Determine reward based on movement towards or away from center
-        if distance_to_center > self.previous_distance_to_center:
-            reward = -0.01  # Penalize moving away
-        else:
-            reward = 0.001  # Small reward for moving closer
+        done, reward = False, self.previous_distance_to_center - distance_to_center
             
         # Check if player has reached the center
         if distance_to_center < 5.0:
             done = True
-            reward = 1.0  # Reward for reaching the center
+            reward += 10.0  # Reward for reaching the center
             info['result'] = 'Goal'
         # Check for out-of-bounds condition
         if player_pos.abs_x() > 52.5 or player_pos.abs_y() > 34.0:
             done = True
-            reward = -1.0  # Penalize for going out of bounds
+            reward -= -10.0  # Penalize for going out of bounds
             info['result'] = 'Out'
         # Check if maximum steps have been exceeded
         if self.step_number > 100:
             done = True
+            reward -= 5.0  # Penalize for taking too long
             info['result'] = 'Timeout'
         # Log the status
         self.logger.debug(

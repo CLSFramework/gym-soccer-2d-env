@@ -3,10 +3,41 @@ import time
 import logging
 import datetime
 from stable_baselines3 import DQN
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from stable_baselines3.common.utils import get_schedule_fn
+from torch import nn
+import torch
+import gym
 from utils.logger_utils import setup_logger
 import matplotlib.pyplot as plt
 from utils.info_collector_callback import InfoCollectorCallback
 from sample_environments.environment_factory import EnvironmentFactory
+
+
+# Define a custom neural network
+class CustomQNetwork(nn.Module):
+    def __init__(self, observation_space, action_space):
+        super(CustomQNetwork, self).__init__()
+        self.observation_space = observation_space
+        self.action_space = action_space
+
+        # Define your network layers
+        input_dim = observation_space.shape[0]
+        output_dim = action_space.n
+
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 16),
+            nn.ReLU(),
+            nn.Linear(16, output_dim),  # Output layer
+            # No activation on the output layer
+        )
+
+    def forward(self, x):
+        return self.network(x)
 
 
 log_dir = os.path.join(os.getcwd(), 'logs', datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
@@ -20,10 +51,18 @@ if __name__ == "__main__":
     print("Press Ctrl+C to exit...")
     try:
         env = EnvironmentFactory().create(env_name, render_mode=False, logger=logger, log_dir=log_dir)
-        model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+
+        # Define the custom policy using policy_kwargs
+        policy_kwargs = dict(
+            net_arch=[128, 64, 32, 16],  # Specify the architecture
+            activation_fn=nn.Tanh,  # Activation function for all layers except the output
+        )
+
+        model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir, policy_kwargs=policy_kwargs)
         info_collector = InfoCollectorCallback()
         
         def train(total_timesteps):
+            logger.info("Training...")
             model.learn(total_timesteps=total_timesteps, callback=info_collector)
             model.ep_info_buffer
         
@@ -44,6 +83,7 @@ if __name__ == "__main__":
             
             test_logger.info(f"#Test results: {results}")
             
+            # return percentage of goals, outs, and timeouts
             episode_count = results['Goal'] + results['Out'] + results['Timeout']
             return results['Goal'] / episode_count, results['Out'] / episode_count, results['Timeout'] / episode_count
         

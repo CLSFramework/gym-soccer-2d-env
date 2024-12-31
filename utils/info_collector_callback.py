@@ -48,7 +48,7 @@ class InfoCollectorCallback(BaseCallback):
         for i in range(0, len(results), 100):
             for type in results_types:
                 length = len(results[i:i+100])
-                self.results[type].append(results[i:i+100].count(type) / length)
+                self.results[type].append(results[i:i+100].count(type) / length * 100)
         
         logger.info(f"Results dictionary: {self.results}")
     
@@ -73,9 +73,7 @@ class InfoCollectorCallback(BaseCallback):
         
         if file_name:
             plt.savefig(file_name + '.png')
-            logger.info(f"Plot saved as {file_name}.png")
         else:
             plt.show()
-            logger.info("Plot displayed.")
         
         return self.results['Goal'], self.results['Out'], self.results['Timeout']
