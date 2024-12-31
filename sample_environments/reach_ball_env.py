@@ -38,32 +38,25 @@ class ReachBallEnv(Soccer2DEnv):
         # Define action and observation spaces
         if self.use_continuous_action:
             if self.use_turning:
-                self.action_space = spaces.Box(low=[0, 0, 0, 0],
-                                               high=[1, 1, 1, 1],
-                                               shape=(4,), dtype=np.float32)
+                self.action_space = spaces.Box(low=np.array([0, 0, 0, 0], dtype=np.float32),
+                                               high=np.array([1, 1, 1, 1], dtype=np.float32),
+                                               dtype=np.float32)
             else:
                 self.action_space = spaces.Box(low=-1, high=1, shape=(1,), dtype=np.float32)
         else:
             self.action_space = spaces.Discrete(self.action_space_size)
         self.observation_space = spaces.Box(low=-1, high=1, shape=(10,), dtype=np.float32)
         self.distance_to_ball = 0.0
+        self.body_ball_angle_diff = 0.0
         self.step_number = 0
         
     def action_to_rpc_actions(self, action, player_state: pb2.State):
         self.logger.debug(f"action_to_rpc_actions: {action} {type(action)}")
         self.step_number += 1
-        # Convert action to a single integer if necessary
-        if isinstance(action, (list, tuple, np.ndarray)):
-            self.logger.debug(f"here1")
-            if isinstance(action, tuple):
-                self.logger.debug(f"here2 {action[0]} {type(action[0])}")
-                action = action[0]
-            if isinstance(action, np.ndarray):
-                self.logger.debug(f"here3 {action.size}")
-                if action.size == 1:
-                    action = action.item()
-            else:
-                action = action[0]
+        # # Convert action to a single integer if necessary
+        if isinstance(action, np.ndarray):
+            if action.size == 1:
+                action = action.item()
         self.logger.debug(f"action_to_rpc_actions: {action}")
         # Calculate relative direction
         if self.use_continuous_action:
@@ -72,12 +65,15 @@ class ReachBallEnv(Soccer2DEnv):
                 turn_angle = action[1]
                 dash_prob = action[2]
                 dash_angle = action[3]
-                
+                turn_prob = max(0.0, min(1.0, turn_prob)) + 1e-6
+                dash_prob = max(0.0, min(1.0, dash_prob)) + 1e-6
                 if random.random() < turn_prob / (turn_prob + dash_prob):
                     relative_direction = (turn_angle * 360.0) % 360.0 - 180.0
+                    self.logger.debug(f"Turn: {relative_direction}")
                     return pb2.PlayerAction(turn=pb2.Turn(relative_direction=relative_direction))
                 else:
                     relative_direction = (dash_angle * 360.0) % 360.0 - 180.0
+                    self.logger.debug(f"Dash: {relative_direction}")
                     return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))
             else:
                 relative_direction = action * 180.0
@@ -107,7 +103,9 @@ class ReachBallEnv(Soccer2DEnv):
                         ball_direction / 360.0,
                         ball_velocity.x() / 3.0,
                         ball_velocity.y() / 3.0])
-        self.logger.debug(f"Observation: {obs}")
+        self.logger.debug(f"State: {ball_pos=}, {ball_speed=}, {ball_direction=}, {player_pos=}, {player_body=}, "
+                          f"{player_to_ball=}, {player_body_to_ball=}")
+        self.logger.debug(f"To Observation: {obs}")
         return obs
     
     def check_trainer_observation(self, state: pb2.State):
@@ -119,10 +117,20 @@ class ReachBallEnv(Soccer2DEnv):
         ball_pos = Vector2D(ball_x, ball_y)
         player_pos = Vector2D(player_x, player_y)
         distance_to_ball = ball_pos.dist(player_pos)
+        player_body: AngleDeg = AngleDeg(state.world_model.teammates[0].body_direction)
+        ball_direction: AngleDeg = (ball_pos - player_pos).th()
+        body_ball_angle_diff: AngleDeg = ball_direction - player_body
         
         info = {'result': None}
-        done, reward = False, self.distance_to_ball - distance_to_ball
-            
+        
+        done, reward = False, 0.0
+        
+        distance_reward = self.distance_to_ball - distance_to_ball
+        reward += distance_reward
+        
+        angle_reward = (AngleDeg(self.body_ball_angle_diff).abs() - body_ball_angle_diff.abs()) / 180.0
+        reward += angle_reward
+        
         # Check if the player reached the ball
         if distance_to_ball < self.min_distance_to_ball:
             done = True
@@ -141,8 +149,12 @@ class ReachBallEnv(Soccer2DEnv):
         
         self.logger.debug(f"Ball position: {ball_pos}, Player position: {player_pos}, "
                           f"Distance to ball: {distance_to_ball} Previous distance: {self.distance_to_ball}, "
+                          f"Body ball angle: {body_ball_angle_diff.degree()} Previous angle: {self.body_ball_angle_diff}, "
+                          f"angle reward: {angle_reward}, distance reward: {distance_reward}, "
                           f"Reward: {reward} Done: {done} Step number: {self.step_number} ")
+        
         self.distance_to_ball = distance_to_ball
+        self.body_ball_angle_diff = body_ball_angle_diff.degree()
         
         return done, reward, info
     

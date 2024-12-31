@@ -26,7 +26,7 @@ kewargs = {
     'max_steps': 200,
     'use_continuous_action': True,
     'action_space_size': 16,
-    'use_turning': False
+    'use_turning': True
 }
 
 if __name__ == "__main__":
@@ -47,7 +47,7 @@ if __name__ == "__main__":
             obs = env.reset()
             results = {'Goal': 0, 'Out': 0, 'Timeout': 0}
             for _ in range(total_timesteps):
-                action = model.predict(obs)
+                action, _ = model.predict(obs)
                 obs, reward, done, info = env.step(action)
                 logger.debug(f"Observation: {obs}, Reward: {reward}, Done: {done}, Info: {info}")
                 if done:

@@ -219,30 +219,39 @@ class Soccer2DEnv(gym.Env):
         :param action: Action to be taken by the player.
         :return: Tuple containing player observation, reward, done flag, and info.
         """
+        self.logger.debug("#" * 50)
+        self.logger.debug(f"Taking step with action: {action} on player state cycle: #{self._latest_player_state.world_model.cycle}# stamina: {self._latest_player_state.world_model.self.stamina}")
+        
         # Send action to player
+        self.logger.debug(f"Sending action to player...")
         self._send_action_to_player(self.action_to_rpc_actions(action, self._latest_player_state))
         
         # Send fake action to trainer
+        self.logger.debug(f"Sending fake action to trainer...")
         self._send_action_to_trainer(pb2.TrainerAction(do_change_mode=pb2.DoChangeMode(game_mode_type=pb2.GameModeType.PlayOn, side=pb2.Side.LEFT)))
         
         # Wait for player observation
-        player_state:pb2.State = self.player_state_queue.get()
-        self._latest_player_state = player_state
-        player_observation = self.state_to_observation(player_state)
+        self._latest_player_state:pb2.State = self.player_state_queue.get()
+        
+        self.logger.debug(f"Received new Player state cycle: #{self._latest_player_state.world_model.cycle}# stamina: {self._latest_player_state.world_model.self.stamina}")
+        
+        player_observation = self.state_to_observation(self._latest_player_state)
         
         # Wait for trainer observation
-        trainer_state:pb2.State = self.trainer_state_queue.get()
-        self._latest_trainer_state = trainer_state
+        self._latest_trainer_state:pb2.State = self.trainer_state_queue.get()
         
-        if player_state.world_model.cycle != trainer_state.world_model.cycle:
-            self.logger.error(f"Player cycle: {player_state.world_model.cycle}, Trainer cycle: {trainer_state.world_model.cycle} are not in sync.")
+        
+        self.logger.debug(f"Received new Trainer state cycle: #{self._latest_trainer_state.world_model.cycle}#")
+        
+        if self._latest_player_state.world_model.cycle != self._latest_trainer_state.world_model.cycle:
+            self.logger.error(f"Player cycle: {self._latest_player_state.world_model.cycle}, Trainer cycle: {self._latest_trainer_state.world_model.cycle} are not in sync.")
             self._wait_for_agents()
         
-        self.logger.debug(f"Step Environment at cycle: ##{player_state.world_model.cycle}##")
+        self.logger.debug(f"Calculating Reward by trainer observation, player target cycle #{self._latest_player_state.world_model.cycle}# trainer state cycle #{self._latest_trainer_state.world_model.cycle}#")
         
         # Check trainer observation
         # Calculate reward
-        done, reward, info = self.check_trainer_observation(trainer_state)
+        done, reward, info = self.check_trainer_observation(self._latest_trainer_state)
         
         # Return player observation, reward, done, info
         return player_observation, reward, done, info
