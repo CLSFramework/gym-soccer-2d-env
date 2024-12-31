@@ -1,2 +1,7 @@
 grpcio==1.65.4
 grpcio-tools==1.65.4
+gym==0.26.2
+matplotlib==3.10.0
+stable-baselines3==2.4.0
+pyrusgeom==0.1.2
+shimmy==2.0.0
