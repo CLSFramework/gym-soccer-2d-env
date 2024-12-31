@@ -81,7 +81,7 @@ class Soccer2DEnv(gym.Env):
             self.rcssserver_thread = threading.Thread(target=self._stream_output_to_logger, args=(self.rcssserver_process, 'server'))
             self.rcssserver_thread.start()
             self.logger.info(f"RCSSServer thread started in pid: {self.rcssserver_thread.ident}")
-            time.sleep(10)
+            time.sleep(5)
         
         # Run player and trainer
         if self.run_trainer_player:
@@ -341,6 +341,7 @@ class Soccer2DEnv(gym.Env):
         rcssserver_path = 'scripts/rcssserver/rcssserver'
         rcssserver_params = ['--server::synch_mode=true', 
                              '--server::auto_mode=true', 
+                             '--server::fullstate_l=true',
                              '--server::coach=true',
                              f'--server::game_log_dir={self.log_dir}',
                              f'--server::text_log_dir={self.log_dir}'

@@ -14,12 +14,23 @@ logger = setup_logger('SampleRL', log_dir, console_level=logging.DEBUG, file_lev
 train_logger = setup_logger('Train', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
 test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
 
-env_name = "ReachCenter"
+env_name = "reachball"
+kewargs = {
+    'change_ball_position': True,
+    'change_ball_velocity': True,
+    'ball_position_x': 0,
+    'ball_position_y': 0,
+    'ball_speed': 0,
+    'ball_direction': 0,
+    'min_distance_to_ball': 5.0,
+    'max_steps': 200,
+    'action_space_size': 16
+}
 
 if __name__ == "__main__":
     print("Press Ctrl+C to exit...")
     try:
-        env = EnvironmentFactory().create(env_name, render_mode=False, logger=logger, log_dir=log_dir)
+        env = EnvironmentFactory().create(env_name, render_mode=False, logger=logger, log_dir=log_dir, **kewargs)
         model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
         info_collector = InfoCollectorCallback()
         

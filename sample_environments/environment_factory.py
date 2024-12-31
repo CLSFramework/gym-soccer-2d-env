@@ -12,7 +12,7 @@ class EnvironmentFactory:
         """
         pass
     
-    def create(self, env_name: str, render_mode: str, logger, log_dir: str) -> Soccer2DEnv:
+    def create(self, env_name: str, render_mode: str, logger, log_dir: str, **kwargs) -> Soccer2DEnv:
         """
         Create an environment based on the given name.
         
@@ -24,8 +24,8 @@ class EnvironmentFactory:
         :raises ValueError: If the environment name is not found.
         """
         if env_name.lower() == "reachcenter":
-            return ReachCenterEnv(render_mode=render_mode, logger=logger, log_dir=log_dir)
+            return ReachCenterEnv(render_mode=render_mode, logger=logger, log_dir=log_dir, **kwargs)
         elif env_name.lower() == "reachball":
-            return ReachBallEnv(render_mode=render_mode, logger=logger, log_dir=log_dir)
+            return ReachBallEnv(render_mode=render_mode, logger=logger, log_dir=log_dir, **kwargs)
         else:
             raise ValueError(f"Environment {env_name} not found.")
