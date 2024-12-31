@@ -16,16 +16,15 @@ test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_le
 
 env_name = "reachball"
 kewargs = {
-    'change_ball_position': True,
-    'change_ball_velocity': True,
+    'change_ball_position': False,
+    'change_ball_velocity': False,
     'ball_position_x': 0,
     'ball_position_y': 0,
     'ball_speed': 0,
     'ball_direction': 0,
     'min_distance_to_ball': 5.0,
     'max_steps': 200,
-    'action_space_size': 16,
-    'use_continuous_action': False,
+    'use_continuous_action': True,
     'action_space_size': 16,
     'use_turning': False
 }
