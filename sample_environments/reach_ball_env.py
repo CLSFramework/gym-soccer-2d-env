@@ -64,6 +64,7 @@ class ReachBallEnv(Soccer2DEnv):
                     action = action.item()
             else:
                 action = action[0]
+        self.logger.debug(f"action_to_rpc_actions: {action}")
         # Calculate relative direction
         if self.use_continuous_action:
             if self.use_turning:

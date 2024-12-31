@@ -368,7 +368,7 @@ class Soccer2DEnv(gym.Env):
         :return: Subprocess running the trainer and player.
         """
         process = subprocess.Popen(
-            ['bash', 'train.sh'],
+            ['bash', 'train.sh', '--rpc-type', 'grpc', '--rpc-timeout', '6'],
             cwd='scripts/proxy',  # Corrected directory to where start.sh is located
             preexec_fn=os.setsid,  # Create a new session and set the process group ID
             stdout=subprocess.PIPE,

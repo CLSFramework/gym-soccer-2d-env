@@ -34,7 +34,7 @@ if __name__ == "__main__":
     try:
         env = EnvironmentFactory().create(env_name, render_mode=False, logger=logger, log_dir=log_dir, **kewargs)
         if kewargs['use_continuous_action']:
-            model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir, use_sde=True)
+            model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
         else:
             model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
         info_collector = InfoCollectorCallback()
