@@ -2,6 +2,16 @@ import gym
 import numpy as np
 from gym import spaces
 import matplotlib.pyplot as plt
+import os
+import time
+import logging
+import datetime
+from stable_baselines3 import DQN, DDPG
+from utils.logger_utils import setup_logger
+import matplotlib.pyplot as plt
+from utils.info_collector_callback import InfoCollectorCallback
+from sample_environments.environment_factory import EnvironmentFactory
+import argparse
 
 
 def wrap_angle_deg(angle):
@@ -52,13 +62,19 @@ class GoToCenterEnv(gym.Env):
     
     metadata = {'render.modes': ['human']}
     
-    def __init__(self, continuous=False, turn=False):
+    def __init__(self, continuous=False, turn=False, actor_out_size=1, use_turn=False):
         super(GoToCenterEnv, self).__init__()
         self.continuous = continuous
         self.turn = turn
+        self.use_turn = use_turn
         # --- Action Space ---
         if self.turn and self.continuous:
-            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
+            # low_acts = np.array([-1.0, -1.0, -1.0, -1.0], dtype=np.float32)
+            # high_acts = np.array([1.0,  1.0,  1.0,  1.0], dtype=np.float32)
+            # self.action_space = spaces.Box(low=low_acts, high=high_acts, shape=(4,), dtype=np.float32)
+            low_acts = np.array([-1.0] * actor_out_size, dtype=np.float32)
+            high_acts = np.array([1.0] * actor_out_size, dtype=np.float32)
+            self.action_space = spaces.Box(low=low_acts, high=high_acts, shape=(actor_out_size,), dtype=np.float32)
         elif self.continuous:
             # Continuous action space: [dash_angle]
             self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
@@ -124,16 +140,21 @@ class GoToCenterEnv(gym.Env):
         turn_selected = False
         if self.turn and self.continuous:
             actions = np.clip(action, -1.0, 1.0)
-            turn_p = actions[0] # -1 to 1
-            dash_p = actions[1] # -1 to 1
-            turn_r = actions[2]
-            dash_r = actions[3]
-            
-            # use softmax to select action (turn or dash) by using the turn and dash p
-            p = np.array([turn_p, dash_p])
-            p = np.exp(p) / np.sum(np.exp(p))
-            turn_selected = np.random.rand() < p[0]
-            dash_selected = not turn_selected
+            dash_r = actions[0]
+            if self.use_turn:
+                turn_r = actions[1]
+                dash_p = actions[2] # -1 to 1
+                turn_p = actions[3] # -1 to 1
+                p = np.array([turn_p, dash_p])
+                p = np.exp(p) / np.sum(np.exp(p))
+                turn_selected = np.random.rand() < p[0]
+                dash_selected = not turn_selected
+            else:
+                turn_r = 0#actions[1]
+                dash_p = 1#actions[2] # -1 to 1
+                turn_p = -1#actions[3] # -1 to 1
+                turn_selected = False #np.random.rand() < p[0]
+                dash_selected = True# not turn_selected
         elif self.continuous:
             dash_selected = True
             action = np.clip(action, -1.0, 1.0)
@@ -303,41 +324,7 @@ class GoToCenterEnv(gym.Env):
             self.viewer = None
             
 
-# env = GoToCenterEnv()
 
-# while True:
-#     obs = env.reset()
-#     done = False
-#     total_reward = 0.0
-#     while not done:
-#         print("#" * 40)
-#         print(f"Step {env.step_count}")
-#         print(f"Position: ({env.x:.2f}, {env.y:.2f}) | Body angle: {env.body_angle_deg:.2f}")
-#         print(f"Observation: {obs}")
-#         # env.render()
-#         # action = int(input("Enter action (0..15): "))
-#         action = env.action_space.sample()
-#         obs, reward, done, _ = env.step(action)
-#         total_reward += reward
-#         print(f"Reward: {reward:.2f} | Total reward: {total_reward}")
-#     env.render_all()
-        
-        
-import os
-import time
-import logging
-import datetime
-from stable_baselines3 import DQN, DDPG
-from utils.logger_utils import setup_logger
-import matplotlib.pyplot as plt
-from utils.info_collector_callback import InfoCollectorCallback
-from sample_environments.environment_factory import EnvironmentFactory
-
-
-log_dir = os.path.join(os.getcwd(), 'logs', datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
-logger = setup_logger('SampleRL', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
-train_logger = setup_logger('Train', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
-test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
 
 # continuous = True
 # turn = True
@@ -364,10 +351,29 @@ test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_le
 #         env.reset()
 #     time.sleep(0.0001)  # Adjust sleep time as needed
 
+parser = argparse.ArgumentParser(description='GoToCenterEnv parameters')
+parser.add_argument('--continuous', action='store_true', help='Use continuous action space', default=False)
+parser.add_argument('--turn', action='store_true', help='Enable turning', default=False)
+parser.add_argument('--useturn', action='store_true', help='Enable turning', default=False)
+parser.add_argument('--actor_out_size', type=int, default=1, help='Size of the actor output')
+parser.add_argument('--name', type=str, default='', help='Name of the environment')
+
+args = parser.parse_args()
+
+use_continuous_action = args.continuous
+use_turning = args.turn
+use_turn = args.useturn
+actor_out_size = args.actor_out_size
+
+log_dir = os.path.join(os.getcwd(), 'logs', datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '_' + args.name)
+logger = setup_logger('SampleRL', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
+train_logger = setup_logger('Train', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
+test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
+
 if __name__ == "__main__":
     print("Press Ctrl+C to exit...")
     try:
-        env = GoToCenterEnv(continuous=True, turn=False)
+        env = GoToCenterEnv(continuous=use_continuous_action, turn=use_turning, actor_out_size=actor_out_size, use_turn=use_turn)
         if env.continuous:
             model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
         else:
@@ -379,10 +385,10 @@ if __name__ == "__main__":
             model.learn(total_timesteps=total_timesteps, callback=info_collector)
             model.ep_info_buffer
         
-        def test(total_timesteps):
+        def test(total_episode):
             obs, _ = env.reset()
             results = {'Goal': 0, 'Out': 0, 'Timeout': 0}
-            for _ in range(total_timesteps):
+            while total_episode > 0:
                 action, _ = model.predict(obs)
                 obs, reward, done, _, info = env.step(action)
                 logger.debug(f"Observation: {obs}, Action: {action}, Reward: {reward}, Done: {done}, Info: {info}")
@@ -391,6 +397,7 @@ if __name__ == "__main__":
                     if info['result']:
                         results[info['result']] += 1
                     env.reset()
+                    total_episode -= 1
                 # env.render()
                 
                 time.sleep(0.0001)  # Adjust sleep time as needed
@@ -401,30 +408,41 @@ if __name__ == "__main__":
             episode_count = results['Goal'] + results['Out'] + results['Timeout']
             return results['Goal'] / episode_count, results['Out'] / episode_count, results['Timeout'] / episode_count
         
+        def plot_test_results(test_results):
+            # Plot test results
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.plot([r[0] for r in test_results], label='Goal')
+            ax.plot([r[1] for r in test_results], label='Out')
+            ax.plot([r[2] for r in test_results], label='Timeout')
+            ax.set_xlabel("Episode")
+            ax.set_ylabel("Percentage")
+            ax.set_title("Test Results")
+            ax.legend()
+            plt.savefig(os.path.join(log_dir, 'test_results.png'))    
+            
         test_results = []
-        test_results.append(test(2000))
-        for i in range(50):
+        test_results.append(test(20))
+        for i in range(100):
             train(10000)
             
-            info_collector.plot_print_results(train_logger, file_name=os.path.join(log_dir, 'results'))
+            info_collector.plot_print_results(train_logger, file_name=os.path.join(log_dir, 'train_results'))
             
-            test_results.append(test(2000))
+            test_results.append(test(20))
+            plot_test_results(test_results)
         
         env.close()
-        
-        # Plot test results
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot([r[0] for r in test_results], label='Goal')
-        ax.plot([r[1] for r in test_results], label='Out')
-        ax.plot([r[2] for r in test_results], label='Timeout')
-        ax.set_xlabel("Episode")
-        ax.set_ylabel("Percentage")
-        ax.set_title("Test Results")
-        ax.legend()
-        plt.show()
         
     except KeyboardInterrupt:
         print("\nCtrl+C detected. Shutting down...")
     finally:
         env.close()
         print("Environment closed successfully.")
+
+# /home/nader/workspace/clsf/gym-soccer-2d-env/.venv/bin/python /home/nader/workspace/clsf/gym-soccer-2d-env/python_sample_soccer_env.py --name d && 
+# /home/nader/workspace/clsf/gym-soccer-2d-env/.venv/bin/python /home/nader/workspace/clsf/gym-soccer-2d-env/python_sample_soccer_env.py --continuous --name c && 
+# /home/nader/workspace/clsf/gym-soccer-2d-env/.venv/bin/python /home/nader/workspace/clsf/gym-soccer-2d-env/python_sample_soccer_env.py --continuous --turn --actor_out_size 1 --name ct1 && 
+# /home/nader/workspace/clsf/gym-soccer-2d-env/.venv/bin/python /home/nader/workspace/clsf/gym-soccer-2d-env/python_sample_soccer_env.py --continuous --turn --actor_out_size 4 --name ct4 && 
+# /home/nader/workspace/clsf/gym-soccer-2d-env/.venv/bin/python /home/nader/workspace/clsf/gym-soccer-2d-env/python_sample_soccer_env.py --continuous --turn --useturn --actor_out_size 4 --name ctut4 && 
+
+
+
