@@ -25,6 +25,13 @@ def angle_to_point_deg(x, y, target_x=0.0, target_y=0.0):
     angle_deg = wrap_angle_deg(angle_deg)
     return angle_deg
 
+def diff_angle_deg_abs(a, b):
+    """
+    Return the absolute difference between angles a and b in degrees.
+    """
+    diff = np.abs(wrap_angle_deg(a - b))
+    return diff.item()
+
 class GoToCenterEnv(gym.Env):
     """
     A custom Gym environment where an agent starts at a random position (x,y)
@@ -45,11 +52,14 @@ class GoToCenterEnv(gym.Env):
     
     metadata = {'render.modes': ['human']}
     
-    def __init__(self, continuous=False):
+    def __init__(self, continuous=False, turn=False):
         super(GoToCenterEnv, self).__init__()
         self.continuous = continuous
+        self.turn = turn
         # --- Action Space ---
-        if self.continuous:
+        if self.turn and self.continuous:
+            self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
+        elif self.continuous:
             # Continuous action space: [dash_angle]
             self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
         else:
@@ -80,6 +90,7 @@ class GoToCenterEnv(gym.Env):
         
         # Keep track of distance to center from previous step for shaping
         self.prev_distance = None
+        self.prev_angle_diff = None
         
         # For rendering (optional)
         self.viewer = None
@@ -97,6 +108,8 @@ class GoToCenterEnv(gym.Env):
         
         # Compute initial distance to center
         self.prev_distance = np.sqrt(self.x**2 + self.y**2)
+        target_angle = angle_to_point_deg(self.x, self.y, 0.0, 0.0)
+        self.prev_angle_diff = diff_angle_deg_abs(self.body_angle_deg, target_angle)
         
         self.episode_history.append((self.x, self.y, self.body_angle_deg, 0.0))
         
@@ -107,32 +120,56 @@ class GoToCenterEnv(gym.Env):
         """
         Execute one step in the environment.
         """
-        if self.continuous:
+        dash_selected = False
+        turn_selected = False
+        if self.turn and self.continuous:
+            actions = np.clip(action, -1.0, 1.0)
+            turn_p = actions[0] # -1 to 1
+            dash_p = actions[1] # -1 to 1
+            turn_r = actions[2]
+            dash_r = actions[3]
+            
+            # use softmax to select action (turn or dash) by using the turn and dash p
+            p = np.array([turn_p, dash_p])
+            p = np.exp(p) / np.sum(np.exp(p))
+            turn_selected = np.random.rand() < p[0]
+            dash_selected = not turn_selected
+        elif self.continuous:
+            dash_selected = True
             action = np.clip(action, -1.0, 1.0)
-            action = action.item()
-            action *= 180.0
+            dash_r = action.item()
         else:
+            dash_selected = True
             action = int(action)
-            action = action * (360.0 / 16.0) - 180.0
+            dash_r = (action / 16.0 - 0.5) * 2.0
         
-        logger.debug(f"Step {self.step_count} | Action: {action}")
+        if dash_selected:
+            direction_angle = wrap_angle_deg(self.body_angle_deg + dash_r * 180.0)
+            logger.debug(f"Step {self.step_count} | Action: {dash_r} | Direction angle: {direction_angle}")
+
+            # Convert movement direction to Cartesian deltas
+            rad = np.radians(direction_angle)
+            dx = np.cos(rad)
+            dy = np.sin(rad)
+
+            # Move forward by 1 meter in the current direction
+            self.x += dx
+            self.y += dy
         
-        direction_angle = wrap_angle_deg(self.body_angle_deg + action)
-
-        # Convert movement direction to Cartesian deltas
-        rad = np.radians(direction_angle)
-        dx = np.cos(rad)
-        dy = np.sin(rad)
-
-        # Move forward by 1 meter in the current direction
-        self.x += dx
-        self.y += dy
+        if turn_selected:
+            logger.debug(f"Step {self.step_count} | Action: {turn_r} | Turn angle: {turn_r}")
+            self.body_angle_deg = wrap_angle_deg(self.body_angle_deg + turn_r * 180.0)
 
         # Compute new distance to center
         distance_to_center = np.sqrt(self.x**2 + self.y**2)
-
+        target_angle = angle_to_point_deg(self.x, self.y, 0.0, 0.0)
+        angle_diff = diff_angle_deg_abs(self.body_angle_deg, target_angle)
+        
         # Reward: Difference in distance to center
-        reward = self.prev_distance - distance_to_center
+        dist_reward = self.prev_distance - distance_to_center
+        angle_reward = (self.prev_angle_diff - angle_diff) / 180.0  # Bonus for aligning with center
+        
+        reward = dist_reward + angle_reward
 
         self.step_count += 1
 
@@ -158,13 +195,18 @@ class GoToCenterEnv(gym.Env):
             status = 'Timeout'
 
         # Update previous distance for next step
+        logger.debug(f"prev_distance = {self.prev_distance}, distance_to_center = {distance_to_center}, prev_angle_diff = {self.prev_angle_diff}, angle_diff = {angle_diff}")
+        logger.debug(f"Dist reward = {dist_reward}, Angle reward = {angle_reward}, Total reward = {reward}")
+        
         self.prev_distance = distance_to_center
+        self.prev_angle_diff = angle_diff
         
         # Store step in episode history
         self.episode_history.append((self.x, self.y, self.body_angle_deg, reward))
         
         info = {'result': status}
         obs = self._get_obs()
+        
         logger.debug(f"obs = {obs}, reward = {reward}, done = {terminated}, truncated = {truncated}, info = {info}")
         return obs, reward, terminated or truncated, terminated or truncated, info
 
@@ -297,13 +339,21 @@ logger = setup_logger('SampleRL', log_dir, console_level=logging.DEBUG, file_lev
 train_logger = setup_logger('Train', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
 test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_level=logging.DEBUG)
 
-# env = GoToCenterEnv(continuous=True)
+# continuous = True
+# turn = True
+# env = GoToCenterEnv(continuous=continuous, turn=turn)
 # obs = env.reset()
 # while True:
 #     # action = env.action_space.sample()
 #     logger.debug(f"x: {env.x}, y: {env.y}, body_angle_deg: {env.body_angle_deg}")
 #     logger.debug(f"Observation: {obs}")
-#     action = float(input("Enter action [-1 to 1]: "))
+#     if continuous and turn:
+#         action = [float(input("Enter turn action [-1 to 1]: ")), float(input("Enter dash action [-1 to 1]: ")), float(input("Enter turn angle [-1 to 1]: ")), float(input("Enter dash angle [-1 to 1]: "))]
+#     elif continuous:
+#         action = float(input("Enter action [-1 to 1]: "))
+#     else:
+#         action = int(input("Enter action [0..15]: "))
+    
 #     obs, reward, done, _, info = env.step(action)
 #     logger.debug(f"Next x: {env.x}, y: {env.y}, body_angle_deg: {env.body_angle_deg}")
 #     logger.debug(f"Next Observation: {obs}, Action: {action}, Reward: {reward}, Done: {done}, Info: {info}")
@@ -317,9 +367,12 @@ test_logger = setup_logger('Test', log_dir, console_level=logging.DEBUG, file_le
 if __name__ == "__main__":
     print("Press Ctrl+C to exit...")
     try:
-        env = GoToCenterEnv(continuous=True)
-        # model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
-        model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+        env = GoToCenterEnv(continuous=True, turn=False)
+        if env.continuous:
+            model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+        else:
+            model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+        
         info_collector = InfoCollectorCallback()
         
         def train(total_timesteps):
