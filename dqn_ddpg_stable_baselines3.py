@@ -43,10 +43,10 @@ if __name__ == "__main__":
             model.learn(total_timesteps=total_timesteps, callback=info_collector)
             model.ep_info_buffer
         
-        def test(total_timesteps):
+        def test(total_episodes):
             obs = env.reset()
             results = {'Goal': 0, 'Out': 0, 'Timeout': 0}
-            for _ in range(total_timesteps):
+            while total_episodes > 0:
                 action, _ = model.predict(obs)
                 obs, reward, done, info = env.step(action)
                 logger.debug(f"Observation: {obs}, Reward: {reward}, Done: {done}, Info: {info}")
@@ -55,33 +55,38 @@ if __name__ == "__main__":
                     if info['result']:
                         results[info['result']] += 1
                     env.reset()
+                    total_episodes -= 1
                 
-                time.sleep(0.0001)  # Adjust sleep time as needed
+                # time.sleep(0.0001)  # Adjust sleep time as needed
             
             test_logger.info(f"#Test results: {results}")
             
             episode_count = results['Goal'] + results['Out'] + results['Timeout']
             return results['Goal'] / episode_count, results['Out'] / episode_count, results['Timeout'] / episode_count
         
+        def plot_test_results(test_results):
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.plot([r[0] for r in test_results], label='Goal')
+            ax.plot([r[1] for r in test_results], label='Out')
+            ax.plot([r[2] for r in test_results], label='Timeout')
+            ax.set_xlabel("Episode")
+            ax.set_ylabel("Percentage")
+            ax.set_title("Test Results")
+            ax.legend()
+            plt.savefig(os.path.join(log_dir, 'test_results.png'))   
+            
         test_results = []
-        test_results.append(test(2000))
-        for i in range(10):
-            train(5000)
+        test_results.append(test(20))
+        for i in range(100):
+            train(10000)
             
-            info_collector.plot_print_results(train_logger, file_name=os.path.join(log_dir, 'results'))
+            info_collector.plot_print_results(train_logger, file_name=os.path.join(log_dir, 'train_results'))
             
-            test_results.append(test(2000))
+            test_results.append(test(20))
+            plot_test_results(test_results)
         
         env.close()
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot([r[0] for r in test_results], label='Goal')
-        ax.plot([r[1] for r in test_results], label='Out')
-        ax.plot([r[2] for r in test_results], label='Timeout')
-        ax.set_xlabel("Episode")
-        ax.set_ylabel("Percentage")
-        ax.set_title("Test Results")
-        ax.legend()
-        plt.show()
+        
     except KeyboardInterrupt:
         print("\nCtrl+C detected. Shutting down...")
     finally:

@@ -30,7 +30,7 @@ class ReachBallEnv(Soccer2DEnv):
         self.ball_speed = kwargs.get('ball_speed', 0)
         self.ball_direction = kwargs.get('ball_direction', 0)
         self.min_distance_to_ball = kwargs.get('min_distance_to_ball', 5.0)
-        self.max_steps = kwargs.get('max_steps', 100)
+        self.max_steps = kwargs.get('max_steps', 200)
         self.use_continuous_action = kwargs.get('use_continuous_action', True)
         self.action_space_size = kwargs.get('action_space_size', 16)
         self.use_turning = kwargs.get('use_turning', False)
@@ -38,7 +38,7 @@ class ReachBallEnv(Soccer2DEnv):
         # Define action and observation spaces
         if self.use_continuous_action:
             if self.use_turning:
-                self.action_space = spaces.Box(low=np.array([0, 0, 0, 0], dtype=np.float32),
+                self.action_space = spaces.Box(low=np.array([-1, -1, -1, -1], dtype=np.float32),
                                                high=np.array([1, 1, 1, 1], dtype=np.float32),
                                                dtype=np.float32)
             else:
@@ -61,18 +61,20 @@ class ReachBallEnv(Soccer2DEnv):
         # Calculate relative direction
         if self.use_continuous_action:
             if self.use_turning:
+                action = np.clip(action, -1.0, 1.0)
                 turn_prob = action[0]
                 turn_angle = action[1]
                 dash_prob = action[2]
                 dash_angle = action[3]
-                turn_prob = max(0.0, min(1.0, turn_prob)) + 1e-6
-                dash_prob = max(0.0, min(1.0, dash_prob)) + 1e-6
-                if random.random() < turn_prob / (turn_prob + dash_prob):
-                    relative_direction = (turn_angle * 360.0) % 360.0 - 180.0
+                p = np.array([dash_prob, turn_prob])
+                p = np.exp(p) / np.sum(np.exp(p))
+                turn_selected = np.random.rand() < p[0]
+                if turn_selected:
+                    relative_direction = turn_angle * 180.0
                     self.logger.debug(f"Turn: {relative_direction}")
                     return pb2.PlayerAction(turn=pb2.Turn(relative_direction=relative_direction))
                 else:
-                    relative_direction = (dash_angle * 360.0) % 360.0 - 180.0
+                    relative_direction = dash_angle * 180.0
                     self.logger.debug(f"Dash: {relative_direction}")
                     return pb2.PlayerAction(dash=pb2.Dash(power=100, relative_direction=relative_direction))
             else:
