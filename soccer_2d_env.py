@@ -147,6 +147,7 @@ class Soccer2DEnv(gym.Env):
         Soccer2DEnv.latest_player_cycle = current_player_cycle
         Soccer2DEnv.latest_trainer_cycle = current_trainer_cycle
         while True:
+            self.logger.debug(f"Waiting for agents to synchronize... Player cycle: {Soccer2DEnv.latest_player_cycle}, Trainer cycle: {Soccer2DEnv.latest_trainer_cycle}")
             if current_player_cycle[0] == -1 or current_trainer_cycle[0] == -1:
                 latest_player_cycle = self._fake_player()
                 latest_trainer_cycle = self._fake_trainer()
