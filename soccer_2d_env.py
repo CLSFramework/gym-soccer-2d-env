@@ -138,15 +138,25 @@ class Soccer2DEnv(gym.Env):
     
     latest_player_cycle = (-1, -1)
     latest_trainer_cycle = (-1, -1)
-    def _wait_for_agents(self):
+    def _wait_for_agents(self, current_player_cycle: tuple = (-1, -1), current_trainer_cycle: tuple = (-1, -1)):
         """
         Wait for the player and trainer agents to synchronize their cycles.
         """
-        Soccer2DEnv.latest_player_cycle = (-1, -1)
-        Soccer2DEnv.latest_trainer_cycle = (-1, -1)
+        self.logger.debug(f"Waiting for agents to synchronize... Player cycle: {current_player_cycle}, Trainer cycle: {current_trainer_cycle}")
+        
+        Soccer2DEnv.latest_player_cycle = current_player_cycle
+        Soccer2DEnv.latest_trainer_cycle = current_trainer_cycle
         while True:
-            latest_player_cycle = self._fake_player()
-            latest_trainer_cycle = self._fake_trainer()
+            if current_player_cycle[0] == -1 or current_trainer_cycle[0] == -1:
+                latest_player_cycle = self._fake_player()
+                latest_trainer_cycle = self._fake_trainer()
+            elif Soccer2DEnv.latest_player_cycle[0] > Soccer2DEnv.latest_trainer_cycle[0]:
+                latest_trainer_cycle = self._fake_trainer()
+                latest_player_cycle = Soccer2DEnv.latest_player_cycle
+            elif Soccer2DEnv.latest_player_cycle[0] < Soccer2DEnv.latest_trainer_cycle[0]:
+                latest_player_cycle = self._fake_player()
+                latest_trainer_cycle = Soccer2DEnv.latest_trainer_cycle
+                
             if latest_player_cycle is not None and latest_player_cycle[0] != -1:
                 Soccer2DEnv.latest_player_cycle = latest_player_cycle
             if latest_trainer_cycle is not None and latest_trainer_cycle[0] != -1:
@@ -245,7 +255,8 @@ class Soccer2DEnv(gym.Env):
         
         if self._latest_player_state.world_model.cycle != self._latest_trainer_state.world_model.cycle:
             self.logger.error(f"Player cycle: {self._latest_player_state.world_model.cycle}, Trainer cycle: {self._latest_trainer_state.world_model.cycle} are not in sync.")
-            self._wait_for_agents()
+            self._wait_for_agents(current_player_cycle=(self._latest_player_state.world_model.cycle, self._latest_player_state.world_model.stoped_cycle), 
+                                  current_trainer_cycle=(self._latest_trainer_state.world_model.cycle, self._latest_trainer_state.world_model.stoped_cycle))
         
         self.logger.debug(f"Calculating Reward by trainer observation, player target cycle #{self._latest_player_state.world_model.cycle}# trainer state cycle #{self._latest_trainer_state.world_model.cycle}#")
         
