@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from utils.info_collector_callback import InfoCollectorCallback
 from sample_environments.environment_factory import EnvironmentFactory
 import argparse
+from torch import nn
 
 
 def wrap_angle_deg(angle):
@@ -352,10 +353,10 @@ class GoToCenterEnv(gym.Env):
 #     time.sleep(0.0001)  # Adjust sleep time as needed
 
 parser = argparse.ArgumentParser(description='GoToCenterEnv parameters')
-parser.add_argument('--continuous', action='store_true', help='Use continuous action space', default=False)
-parser.add_argument('--turn', action='store_true', help='Enable turning', default=False)
-parser.add_argument('--useturn', action='store_true', help='Enable turning', default=False)
-parser.add_argument('--actor_out_size', type=int, default=1, help='Size of the actor output')
+parser.add_argument('--continuous', action='store_true', help='Use continuous action space', default=True)
+parser.add_argument('--turn', action='store_true', help='Enable turning', default=True)
+parser.add_argument('--useturn', action='store_true', help='Enable turning', default=True)
+parser.add_argument('--actor_out_size', type=int, default=4, help='Size of the actor output')
 parser.add_argument('--name', type=str, default='', help='Name of the environment')
 
 args = parser.parse_args()
@@ -375,7 +376,15 @@ if __name__ == "__main__":
     try:
         env = GoToCenterEnv(continuous=use_continuous_action, turn=use_turning, actor_out_size=actor_out_size, use_turn=use_turn)
         if env.continuous:
-            model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+            model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir,
+                         policy_kwargs = dict(
+                                net_arch={
+                                    'pi': [16, 8],
+                                    'qf': [64, 32, 16, 8]
+                                },
+                                activation_fn=nn.ReLU
+                            )
+                         )
         else:
             model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
         
@@ -429,6 +438,9 @@ if __name__ == "__main__":
             
             test_results.append(test(20))
             plot_test_results(test_results)
+            
+            if test_results[-1][0] > 0.99:
+                break
         
         env.close()
         
