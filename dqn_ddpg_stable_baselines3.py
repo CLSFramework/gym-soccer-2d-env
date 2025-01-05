@@ -7,6 +7,7 @@ from utils.logger_utils import setup_logger
 import matplotlib.pyplot as plt
 from utils.info_collector_callback import InfoCollectorCallback
 from sample_environments.environment_factory import EnvironmentFactory
+from torch import nn
 
 
 log_dir = os.path.join(os.getcwd(), 'logs', datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
@@ -34,7 +35,16 @@ if __name__ == "__main__":
     try:
         env = EnvironmentFactory().create(env_name, render_mode=False, logger=logger, log_dir=log_dir, **kewargs)
         if kewargs['use_continuous_action']:
-            model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
+            model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log=log_dir,
+                            policy_kwargs = dict(
+                                net_arch={
+                                    'pi': [16, 8],
+                                    'qf': [64, 32, 16, 8]
+                                },
+                                activation_fn=nn.ReLU
+                            )
+                         )
+                                
         else:
             model = DQN("MlpPolicy", env, verbose=1, tensorboard_log=log_dir)
         info_collector = InfoCollectorCallback()
@@ -84,6 +94,9 @@ if __name__ == "__main__":
             
             test_results.append(test(20))
             plot_test_results(test_results)
+            
+            # save model
+            model.save(os.path.join(log_dir, f'model_{i}_{test_results[-1][0]:.2f}'))
         
         env.close()
         
